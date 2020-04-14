@@ -31,11 +31,11 @@ public class GoPlugin implements LanguagePlugin, Closeable {
 		this.tempDir = tempDir;
 	}
 
-	public Node[] execParser(String path) throws IOException {
+	public Node[] execParser(String rootFolder, String path) throws IOException {
 		Runtime rt = Runtime.getRuntime();
 //		String parserPath = getClass().getClassLoader().getResource("parser").getFile(); TODO: check resource in build
 		String parserPath = "/home/rodrigo/development/go-ast-parser/parser";
-		String[] commands = { parserPath, "-file", path };
+		String[] commands = { parserPath, "-directory", rootFolder, "-file", path };
 		
 		Process proc = rt.exec(commands);
 		BufferedReader stdInput = new BufferedReader(new InputStreamReader(proc.getInputStream()));
@@ -62,7 +62,6 @@ public class GoPlugin implements LanguagePlugin, Closeable {
 
 	@Override
 	public CstRoot parse(SourceFileSet sources) throws Exception {
-		List<String> sourceFiles = new ArrayList<>();
 		Optional<Path> optBasePath = sources.getBasePath();
 		Map<String, CstNode> nodeByAddress = new HashMap<>();
 		Map<String, HashSet<String>> childrenByAddress = new HashMap<>();
@@ -75,9 +74,6 @@ public class GoPlugin implements LanguagePlugin, Closeable {
 				optBasePath = sources.getBasePath();
 			}
 		}
-		for (SourceFile sourceFile : sources.getSourceFiles()) {
-			sourceFiles.add(sourceFile.getPath());
-		}
 
 		File rootFolder = optBasePath.get().toFile();
 
@@ -86,7 +82,7 @@ public class GoPlugin implements LanguagePlugin, Closeable {
 			int nodeCounter = 1;
 
 			for (SourceFile sourceFile : sources.getSourceFiles()) {
-				Node[] astNodes = this.execParser(String.format("%s/%s", rootFolder, sourceFile.getPath()));
+				Node[] astNodes = this.execParser(rootFolder.toString(), sourceFile.getPath());
 				for (Node node : astNodes) {
 
 					node.setId(nodeCounter);
@@ -127,14 +123,14 @@ public class GoPlugin implements LanguagePlugin, Closeable {
 		cstNode.setType(node.getType());
 		cstNode.setSimpleName(node.getName());
 		cstNode.setNamespace(node.getNamespace());
-		cstNode.setLocation(new Location(fileName, node.getStart(), node.getEnd(), node.getStart()));
+		cstNode.setLocation(new Location(fileName, node.getStart(), node.getEnd(), node.getLine()));
 
-		// TODO: Check TYPE_MEMBER use
-		if (node.getType().equals(NodeType.FILE) || node.getType().equals(NodeType.FUNCTION) && node.getParent().endsWith(".go")) {
+		// TODO: check TYPE_MEMBER use
+		if (node.getType().equals(NodeType.FUNCTION)) {
 			cstNode.getStereotypes().add(Stereotype.TYPE_MEMBER);
 		}
 
-		if (node.isHasBody()) {
+		if (node.hasBody()) {
 			cstNode.getStereotypes().add(Stereotype.HAS_BODY);
 		} else {
 			cstNode.getStereotypes().add(Stereotype.ABSTRACT);
@@ -149,7 +145,11 @@ public class GoPlugin implements LanguagePlugin, Closeable {
 		}
 		
 		if (node.getType().equals(NodeType.FUNCTION)) {
-			cstNode.setLocalName(String.format("%s(%s)", node.getName(), String.join(",", node.getParameterTypes())));
+			String localName = String.format("%s(%s)", node.getName(), String.join(",", node.getParameterTypes()));
+			if (node.getReceiver() != null && !node.getReceiver().isEmpty()) {
+				localName = String.format("%s.%s", node.getReceiver(), localName);
+			}
+			cstNode.setLocalName(localName);
 		} else {
 			cstNode.setLocalName(node.getName());
 		}

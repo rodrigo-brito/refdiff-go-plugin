@@ -8,9 +8,11 @@ public class Node {
 	private int id;
 	private int start;
 	private int end;
+	private int line;
 	private String name;
 	private String type;
 	private String parent;
+	private String receiver;
 	private String namespace;
 
 	@SerializedName("has_body")
@@ -33,6 +35,22 @@ public class Node {
 		this.id = id;
 	}
 
+	public int getLine() {
+		return line;
+	}
+
+	public String getReceiver() {
+		return receiver;
+	}
+
+	public void setReceiver(String receiver) {
+		this.receiver = receiver;
+	}
+
+	public void setLine(int line) {
+		this.line = line;
+	}
+
 	public String getParent() {
 		return parent;
 	}
@@ -41,7 +59,7 @@ public class Node {
 		this.parent = parent;
 	}
 
-	public boolean isHasBody() {
+	public boolean hasBody() {
 		return hasBody;
 	}
 
