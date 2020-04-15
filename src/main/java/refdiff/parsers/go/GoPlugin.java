@@ -33,12 +33,14 @@ public class GoPlugin implements LanguagePlugin, Closeable {
 
 	public Node[] execParser(String rootFolder, String path) throws IOException {
 		Runtime rt = Runtime.getRuntime();
-//		String parserPath = getClass().getClassLoader().getResource("parser").getFile(); TODO: check resource in build
-		String parserPath = "/home/rodrigo/development/go-ast-parser/parser";
+		String parserPath = getClass().getClassLoader().getResource("parser").getFile();
+//		String parserPath = "/home/rodrigo/development/go-ast-parser/parser";
 		String[] commands = { parserPath, "-directory", rootFolder, "-file", path };
 		
 		Process proc = rt.exec(commands);
 		BufferedReader stdInput = new BufferedReader(new InputStreamReader(proc.getInputStream()));
+		BufferedReader sttErr = new BufferedReader(new InputStreamReader(proc.getErrorStream()));
+		String errors = sttErr.lines().collect(Collectors.joining());
 		String content = stdInput.lines().collect(Collectors.joining());
 
 		return new GsonBuilder().create().fromJson(content, Node[].class);
