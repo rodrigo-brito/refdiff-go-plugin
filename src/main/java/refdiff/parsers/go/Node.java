@@ -1,9 +1,15 @@
 package refdiff.parsers.go;
 
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.Map;
+
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.fasterxml.jackson.annotation.JsonSetter;
 import com.google.gson.annotations.SerializedName;
 import refdiff.core.cst.TokenPosition;
 
+//@JsonIgnoreProperties(ignoreUnknown = true)
 public class Node {
 	private int id;
 	private int start;
@@ -27,6 +33,9 @@ public class Node {
 	@SerializedName("parameter_types")
 	ArrayList<String> parameterTypes = new ArrayList<>();
 
+	@SerializedName("function_calls")
+	ArrayList<String> functionCalls = new ArrayList<>();
+
 	public int getId() {
 		return id;
 	}
@@ -43,10 +52,12 @@ public class Node {
 		return receiver;
 	}
 
+	@JsonSetter("receiver")
 	public void setReceiver(String receiver) {
 		this.receiver = receiver;
 	}
 
+	@JsonSetter("line")
 	public void setLine(int line) {
 		this.line = line;
 	}
@@ -55,6 +66,7 @@ public class Node {
 		return parent;
 	}
 
+	@JsonSetter("parent")
 	public void setParent(String parent) {
 		this.parent = parent;
 	}
@@ -63,6 +75,7 @@ public class Node {
 		return hasBody;
 	}
 
+	@JsonSetter("has_body")
 	public void setHasBody(boolean hasBody) {
 		this.hasBody = hasBody;
 	}
@@ -71,6 +84,7 @@ public class Node {
 		return tokens;
 	}
 
+	@JsonSetter("tokens")
 	public void setTokens(ArrayList<String> tokens) {
 		this.tokens = tokens;
 	}
@@ -79,6 +93,7 @@ public class Node {
 		return parametersNames;
 	}
 
+	@JsonSetter("parameter_names")
 	public void setParametersNames(ArrayList<String> parametersNames) {
 		this.parametersNames = parametersNames;
 	}
@@ -87,8 +102,18 @@ public class Node {
 		return parameterTypes;
 	}
 
+	@JsonSetter("parameter_types")
 	public void setParameterTypes(ArrayList<String> parameterTypes) {
 		this.parameterTypes = parameterTypes;
+	}
+
+	public ArrayList<String> getFunctionCalls() {
+		return functionCalls;
+	}
+
+	@JsonSetter("function_calls")
+	public void setFunctionCalls(ArrayList<String> functionCalls) {
+		this.functionCalls = functionCalls;
 	}
 
 	public int getStart() {
@@ -111,35 +136,62 @@ public class Node {
 		return namespace;
 	}
 
+	@JsonSetter("start")
 	public void setStart(int start) {
 		this.start = start;
 	}
 
+	@JsonSetter("end")
 	public void setEnd(int end) {
 		this.end = end;
 	}
 
+	@JsonSetter("name")
 	public void setName(String name) {
 		this.name = name;
 	}
 
+	@JsonSetter("type")
 	public void setType(String type) {
 		this.type = type;
 	}
 
+	@JsonSetter("namespace")
 	public void setNamespace(String namespace) {
 		this.namespace = namespace;
 	}
 
-	public ArrayList<TokenPosition> getTokenPositions() {
+	public ArrayList<TokenPosition> getTokenPositions(String content) {
 		ArrayList<TokenPosition> positions = new ArrayList<>();
 		if (this.tokens == null) {
 			return positions;
 		}
 
+		Map<Integer, Integer> linePositionOffset = new HashMap<>();
+		linePositionOffset.put(0, 0);
+		int lineNumber = 1;
+		String[] lines = content.split(System.lineSeparator());
+		for (String line: lines) {
+			linePositionOffset.put(lineNumber, linePositionOffset.get(lineNumber-1) + line.length() + System.lineSeparator().length());
+			lineNumber++;
+		}
+
+
 		for(String token: this.tokens) {
-			String[] parts = token.split("-");
-			positions.add(new TokenPosition(Integer.parseInt(parts[0]), Integer.parseInt(parts[1])));
+			String[] parts = token.split(":");
+
+			int line = Integer.parseInt(parts[0]);
+			int column = Integer.parseInt(parts[1]);
+			int size = Integer.parseInt(parts[2]);
+
+			if (line >= lines.length){
+				System.out.println("eita!");
+			}
+
+			int startPosition = linePositionOffset.get(line) + column;
+			int endPosition = startPosition + size;
+
+			positions.add(new TokenPosition(startPosition, endPosition));
 		}
 
 		return positions;

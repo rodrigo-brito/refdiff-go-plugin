@@ -10,10 +10,12 @@ import java.net.URL;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.*;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 import com.eclipsesource.v8.NodeJS;
 import com.eclipsesource.v8.V8Object;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.gson.GsonBuilder;
 
 import refdiff.core.cst.*;
@@ -32,18 +34,12 @@ public class GoPlugin implements LanguagePlugin, Closeable {
 	}
 
 	public Node[] execParser(String rootFolder, String path) throws IOException {
-		Runtime rt = Runtime.getRuntime();
-		String parserPath = getClass().getClassLoader().getResource("parser").getFile();
-//		String parserPath = "/home/rodrigo/development/go-ast-parser/parser";
-		String[] commands = { parserPath, "-directory", rootFolder, "-file", path };
-		
-		Process proc = rt.exec(commands);
-		BufferedReader stdInput = new BufferedReader(new InputStreamReader(proc.getInputStream()));
-		BufferedReader sttErr = new BufferedReader(new InputStreamReader(proc.getErrorStream()));
-		String errors = sttErr.lines().collect(Collectors.joining());
-		String content = stdInput.lines().collect(Collectors.joining());
+		ProcessBuilder builder = new ProcessBuilder("/bin/bash", "-c",
+				"/home/rodrigo/development/go-ast-parser/parser -directory " + rootFolder +  " -file "+ path);
+		Process proc = builder.start();
 
-		return new GsonBuilder().create().fromJson(content, Node[].class);
+		ObjectMapper mapper = new ObjectMapper();
+		return mapper.readValue(proc.getInputStream(), Node[].class);
 	}
 
 	private void updateChildrenNodes(Map<String, CstNode> nodeByAddress, Map<String, HashSet<String>> childrenByAddress) {
@@ -62,11 +58,33 @@ public class GoPlugin implements LanguagePlugin, Closeable {
 		}
 	}
 
+	private void updateFunctionCalls(CstRoot root, Map<String, CstNode> nodeByAddress, Map<String, HashSet<String>> functionCalls) {
+		for (Map.Entry<String, HashSet<String>> node : functionCalls.entrySet()) {
+			if (!nodeByAddress.containsKey(node.getKey())) {
+				throw new RuntimeException("node not found: " + node.getKey());
+			}
+
+			CstNode caller = nodeByAddress.get(node.getKey());
+			for (String functionCall: node.getValue()) {
+				if (!nodeByAddress.containsKey(functionCall)) {
+					throw new RuntimeException("node not found: " + functionCall);
+				}
+				root.getRelationships().add(new CstNodeRelationship(CstNodeRelationshipType.USE, caller.getId(), nodeByAddress.get(functionCall).getId()));
+			}
+		}
+	}
+
+	private TokenizedSource tokenizeSourceFile(Node node, SourceFileSet sources, SourceFile sourceFile) throws IOException {
+		ArrayList<TokenPosition> tokens = node.getTokenPositions(sources.readContent(sourceFile));
+		return new TokenizedSource(sourceFile.getPath(), tokens);
+	}
+
 	@Override
 	public CstRoot parse(SourceFileSet sources) throws Exception {
 		Optional<Path> optBasePath = sources.getBasePath();
 		Map<String, CstNode> nodeByAddress = new HashMap<>();
 		Map<String, HashSet<String>> childrenByAddress = new HashMap<>();
+		Map<String, HashSet<String>> functionCalls = new HashMap<>();
 
 		if (!optBasePath.isPresent()) {
 			if (this.tempDir == null) {
@@ -91,9 +109,7 @@ public class GoPlugin implements LanguagePlugin, Closeable {
 					nodeCounter++;
 
 					if (node.getType().equals(NodeType.FILE)) {
-						ArrayList<TokenPosition> tokens = node.getTokenPositions();
-						TokenizedSource tokenizedSource = new TokenizedSource(sourceFile.getPath(), tokens);
-						root.addTokenizedFile(tokenizedSource);
+						root.addTokenizedFile(tokenizeSourceFile(node, sources, sourceFile));
 					}
 
 					CstNode cstNode = toCSTNode(node, sourceFile.getPath());
@@ -109,10 +125,20 @@ public class GoPlugin implements LanguagePlugin, Closeable {
 						childrenByAddress.get(node.getParent()).add(node.getAddress());
 					}
 
+					// save call graph information
+					if (node.getType().equals(NodeType.FUNCTION) && node.getFunctionCalls() != null) {
+						// initialize if key not present
+						if (!functionCalls.containsKey(node.getAddress())) {
+							functionCalls.put(node.getAddress(), new HashSet<>());
+						}
+						functionCalls.get(node.getAddress()).addAll(node.getFunctionCalls());
+					}
+
 					root.addNode(cstNode);
 				}
 			}
 			updateChildrenNodes(nodeByAddress, childrenByAddress);
+			updateFunctionCalls(root, nodeByAddress, functionCalls);
 
 			return root;
 		} catch (Exception e) {
@@ -134,7 +160,7 @@ public class GoPlugin implements LanguagePlugin, Closeable {
 
 		if (node.hasBody()) {
 			cstNode.getStereotypes().add(Stereotype.HAS_BODY);
-		} else {
+		} else if(node.getType().equals(NodeType.FUNCTION) || node.getType().equals(NodeType.STRUCT))  {
 			cstNode.getStereotypes().add(Stereotype.ABSTRACT);
 		}
 
