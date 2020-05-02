@@ -1,28 +1,18 @@
 package refdiff.parsers.go;
 
-import java.io.BufferedReader;
-import java.io.Closeable;
-import java.io.File;
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.InputStreamReader;
-import java.net.URL;
-import java.nio.file.Files;
+import java.io.*;
 import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.*;
-import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
-
-import com.eclipsesource.v8.NodeJS;
-import com.eclipsesource.v8.V8Object;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.google.gson.GsonBuilder;
 
 import refdiff.core.cst.*;
 import refdiff.core.io.FilePathFilter;
 import refdiff.core.io.SourceFile;
 import refdiff.core.io.SourceFileSet;
 import refdiff.parsers.LanguagePlugin;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 public class GoPlugin implements LanguagePlugin, Closeable {
 	private File tempDir = null;
@@ -34,18 +24,43 @@ public class GoPlugin implements LanguagePlugin, Closeable {
 	}
 
 	public Node[] execParser(String rootFolder, String path) throws IOException {
-		ProcessBuilder builder = new ProcessBuilder("/bin/bash", "-c",
-				"/home/rodrigo/development/go-ast-parser/parser -directory " + rootFolder +  " -file "+ path);
+		ProcessBuilder builder = new ProcessBuilder("/home/rodrigo/development/go-ast-parser/parser",
+				"-directory", rootFolder, "-file", path);
 		Process proc = builder.start();
 
-		ObjectMapper mapper = new ObjectMapper();
-		return mapper.readValue(proc.getInputStream(), Node[].class);
+		System.out.println("Parsing: "+path);
+
+		Node[] nodes = new Node[0];
+		try {
+			ObjectMapper mapper = new ObjectMapper();
+			nodes = mapper.readValue(proc.getInputStream(), Node[].class);
+		} catch (Exception e) {
+			String errors = new BufferedReader(new InputStreamReader(proc.getErrorStream()))
+					.lines().collect(Collectors.joining("\n"));
+			if (errors.length() > 0) {
+				throw new RuntimeException(errors);
+			}
+			e.printStackTrace();
+		}
+
+		return nodes;
 	}
 
-	private void updateChildrenNodes(Map<String, CstNode> nodeByAddress, Map<String, HashSet<String>> childrenByAddress) {
+	private void updateChildrenNodes(CstRoot root, Map<String, CstNode> nodeByAddress, Map<String, CstNode> fallbackByAddress,
+									 Map<String, HashSet<String>> childrenByAddress) {
+
 		for (Map.Entry<String, HashSet<String>> parent : childrenByAddress.entrySet()) {
 			if (!nodeByAddress.containsKey(parent.getKey())) {
-				throw new RuntimeException("node not found: " + parent.getKey());
+
+				// check nodes in fallbacks and add to root
+				CstNode fallbackNode = fallbackByAddress.get(parent.getKey());
+				if (fallbackNode == null) {
+//					throw new RuntimeException("node not found: " + parent.getKey());
+					System.err.println("NODE NOT FOUND: " + parent.getKey());
+					continue;
+				}
+				nodeByAddress.put(parent.getKey(), fallbackNode);
+				root.addNode(fallbackNode);
 			}
 
 			CstNode parentNode = nodeByAddress.get(parent.getKey());
@@ -58,7 +73,9 @@ public class GoPlugin implements LanguagePlugin, Closeable {
 		}
 	}
 
-	private void updateFunctionCalls(CstRoot root, Map<String, CstNode> nodeByAddress, Map<String, HashSet<String>> functionCalls) {
+	private void updateFunctionCalls(CstRoot root, Map<String, CstNode> nodeByAddress, Map<String, CstNode> fallbackByAddress,
+									 Map<String, HashSet<String>> functionCalls) {
+
 		for (Map.Entry<String, HashSet<String>> node : functionCalls.entrySet()) {
 			if (!nodeByAddress.containsKey(node.getKey())) {
 				throw new RuntimeException("node not found: " + node.getKey());
@@ -67,9 +84,15 @@ public class GoPlugin implements LanguagePlugin, Closeable {
 			CstNode caller = nodeByAddress.get(node.getKey());
 			for (String functionCall: node.getValue()) {
 				if (!nodeByAddress.containsKey(functionCall)) {
-					throw new RuntimeException("node not found: " + functionCall);
+					CstNode fallbackNode = fallbackByAddress.get(functionCall);
+					if (fallbackNode == null) {
+						continue;
+					}
+					nodeByAddress.put(functionCall, fallbackNode);
+					root.addNode(fallbackNode);
 				}
-				root.getRelationships().add(new CstNodeRelationship(CstNodeRelationshipType.USE, caller.getId(), nodeByAddress.get(functionCall).getId()));
+				root.getRelationships().add(new CstNodeRelationship(CstNodeRelationshipType.USE, caller.getId(),
+						nodeByAddress.get(functionCall).getId()));
 			}
 		}
 	}
@@ -79,16 +102,50 @@ public class GoPlugin implements LanguagePlugin, Closeable {
 		return new TokenizedSource(sourceFile.getPath(), tokens);
 	}
 
+	private boolean isValidGoFile(String path) {
+		return path.endsWith(".go") && !path.startsWith("vendor/") && !path.endsWith("_test.go") &&
+				!path.endsWith("generated.pb.go") && !path.endsWith("_gen.go") && !path.endsWith("_generated.go") &&
+				!path.endsWith(".generated.go") && !path.matches("generated\\..+\\.go$");
+	}
+
 	@Override
 	public CstRoot parse(SourceFileSet sources) throws Exception {
 		Optional<Path> optBasePath = sources.getBasePath();
 		Map<String, CstNode> nodeByAddress = new HashMap<>();
+		Map<String, CstNode> fallbackByAddress = new HashMap<>();
 		Map<String, HashSet<String>> childrenByAddress = new HashMap<>();
 		Map<String, HashSet<String>> functionCalls = new HashMap<>();
+		List<SourceFile> additionalFiles = new ArrayList<>();
+		List<SourceFile> sourceFiles = new ArrayList<>();
+
+		for (SourceFile sourceFile : sources.getSourceFiles()) {
+			if (!isValidGoFile(sourceFile.getPath())) {
+				continue;
+			}
+
+			sourceFiles.add(sourceFile);
+
+			File parent = new File(sourceFile.getPath()).getParentFile();
+			String sourceFolder = "";
+			if (parent != null) {
+				sourceFolder = parent.getPath();
+			}
+
+			for (SourceFile file : sources.getFilesFromPath(Paths.get(sourceFolder))) {
+				if (!isValidGoFile(file.getPath())) {
+					continue;
+				}
+
+				additionalFiles.add(file);
+			}
+		}
+
+		sources.getSourceFiles().addAll(additionalFiles);
 
 		if (!optBasePath.isPresent()) {
 			if (this.tempDir == null) {
-				throw new RuntimeException("The GoParser requires a SourceFileSet that is materialized on the file system. Either pass a tempDir to GoParser's contructor or call SourceFileSet::materializeAt before calling this method.");
+				throw new RuntimeException("The GoParser requires a SourceFileSet that is materialized on the file system. " +
+						"Either pass a tempDir to GoParser's contructor or call SourceFileSet::materializeAt before calling this method.");
 			} else {
 				sources.materializeAtBase(tempDir.toPath());
 				optBasePath = sources.getBasePath();
@@ -99,14 +156,14 @@ public class GoPlugin implements LanguagePlugin, Closeable {
 
 		try {
 			CstRoot root = new CstRoot();
+			Map<String, Boolean> fileProcessed = new HashMap<>();
 			int nodeCounter = 1;
 
-			for (SourceFile sourceFile : sources.getSourceFiles()) {
+			for (SourceFile sourceFile : sourceFiles) {
+				fileProcessed.put(sourceFile.getPath(), true);
 				Node[] astNodes = this.execParser(rootFolder.toString(), sourceFile.getPath());
 				for (Node node : astNodes) {
-
-					node.setId(nodeCounter);
-					nodeCounter++;
+					node.setId(nodeCounter++);
 
 					if (node.getType().equals(NodeType.FILE)) {
 						root.addTokenizedFile(tokenizeSourceFile(node, sources, sourceFile));
@@ -137,8 +194,28 @@ public class GoPlugin implements LanguagePlugin, Closeable {
 					root.addNode(cstNode);
 				}
 			}
-			updateChildrenNodes(nodeByAddress, childrenByAddress);
-			updateFunctionCalls(root, nodeByAddress, functionCalls);
+
+			for (SourceFile sourceFile: additionalFiles) {
+				if (fileProcessed.getOrDefault(sourceFile.getPath(), false)) { // avoid duplicate parser
+					continue;
+				}
+
+				fileProcessed.put(sourceFile.getPath(), true);
+				Node[] astNodes = this.execParser(rootFolder.toString(), sourceFile.getPath());
+				for (Node node : astNodes) {
+					node.setId(nodeCounter++);
+
+					if (node.getType().equals(NodeType.FILE)) {
+						root.addTokenizedFile(tokenizeSourceFile(node, sources, sourceFile));
+					}
+
+					CstNode cstNode = toCSTNode(node, sourceFile.getPath());
+					fallbackByAddress.put(node.getAddress(), cstNode);
+				}
+			}
+
+			updateChildrenNodes(root, nodeByAddress, fallbackByAddress, childrenByAddress);
+			updateFunctionCalls(root, nodeByAddress, fallbackByAddress, functionCalls);
 
 			return root;
 		} catch (Exception e) {
@@ -146,15 +223,14 @@ public class GoPlugin implements LanguagePlugin, Closeable {
 		}
 	}
 
-	private CstNode toCSTNode(Node node, String fileName) {
+	private CstNode toCSTNode(Node node, String filePath) {
 		CstNode cstNode = new CstNode(node.getId());
 		cstNode.setType(node.getType());
 		cstNode.setSimpleName(node.getName());
 		cstNode.setNamespace(node.getNamespace());
-		cstNode.setLocation(new Location(fileName, node.getStart(), node.getEnd(), node.getLine()));
+		cstNode.setLocation(new Location(filePath, node.getStart(), node.getEnd(), node.getLine()));
 
-		// TODO: check TYPE_MEMBER use
-		if (node.getType().equals(NodeType.FUNCTION)) {
+		if (node.getType().equals(NodeType.STRUCT)) {
 			cstNode.getStereotypes().add(Stereotype.TYPE_MEMBER);
 		}
 
@@ -181,16 +257,15 @@ public class GoPlugin implements LanguagePlugin, Closeable {
 		} else {
 			cstNode.setLocalName(node.getName());
 		}
-		
 
 		return cstNode;
 	}
 
 	@Override
 	public FilePathFilter getAllowedFilesFilter() {
-		return new FilePathFilter(Arrays.asList(".go"), Arrays.asList("_test.go"));
+		return new FilePathFilter(Arrays.asList(".go"), Arrays.asList("_test.go", "gen.go"));
 	}
 
 	@Override
-	public void close() throws IOException {}
+	public void close() {}
 }

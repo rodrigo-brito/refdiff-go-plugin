@@ -167,31 +167,34 @@ public class Node {
 			return positions;
 		}
 
-		Map<Integer, Integer> linePositionOffset = new HashMap<>();
-		linePositionOffset.put(0, 0);
-		int lineNumber = 1;
-		String[] lines = content.split(System.lineSeparator());
-		for (String line: lines) {
-			linePositionOffset.put(lineNumber, linePositionOffset.get(lineNumber-1) + line.length() + System.lineSeparator().length());
-			lineNumber++;
-		}
+//		Map<Integer, Integer> linePositionOffset = new HashMap<>();
+//		linePositionOffset.put(0, 0);
+//		int lineNumber = 1;
+//		String[] lines = content.split(System.lineSeparator());
+//		for (String line: lines) {
+//			linePositionOffset.put(lineNumber, linePositionOffset.get(lineNumber-1) + line.length() + System.lineSeparator().length());
+//			lineNumber++;
+//		}
 
 
 		for(String token: this.tokens) {
-			String[] parts = token.split(":");
+			String[] parts = token.split("-");
 
-			int line = Integer.parseInt(parts[0]);
-			int column = Integer.parseInt(parts[1]);
-			int size = Integer.parseInt(parts[2]);
+			int start = Integer.parseInt(parts[0]);
+			int end = Integer.parseInt(parts[1]);
 
-			if (line >= lines.length){
-				System.out.println("eita!");
-			}
+//			int line = Integer.parseInt(parts[0]);
+//			int column = Integer.parseInt(parts[1]);
+//			int size = Integer.parseInt(parts[2]);
+//
+//			if (line >= lines.length){
+//				System.out.println("eita!");
+//			}
+//
+//			int startPosition = linePositionOffset.get(line) + column;
+//			int endPosition = startPosition + size;
 
-			int startPosition = linePositionOffset.get(line) + column;
-			int endPosition = startPosition + size;
-
-			positions.add(new TokenPosition(startPosition, endPosition));
+			positions.add(new TokenPosition(start, end));
 		}
 
 		return positions;

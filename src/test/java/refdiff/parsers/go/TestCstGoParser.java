@@ -66,9 +66,10 @@ public class TestCstGoParser {
 		String sourceCode = sources.readContent(sources.getSourceFiles().get(0));
 
 		List<String> actual = CstRootHelper.retrieveTokens(cstRoot, sourceCode, fileNode, false);
-		List<String> expected = Arrays.asList("package", "main", "\n", "func", "Test", "(", "int", "a", ")", "int", "{", "return", "a", "\n", "}");
+		List<String> expected = Arrays.asList("package", "main", "\n", "// comment with UTF-8 chars: áçãûm test",
+				"func", "Test", "(", "a", "string", ")", "string", "{", "return", "a", "\n", "}");
 
-		assertThat(actual, is(expected));
+		assertArrayEquals(expected.toArray(), actual.toArray());
 	}
 	
 }

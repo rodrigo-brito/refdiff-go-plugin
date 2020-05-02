@@ -1,5 +1,6 @@
 package main
 
-func Test(int a) int {
+// comment with UTF-8 chars: áçãûm test
+func Test(a string) string {
     return a
 }
