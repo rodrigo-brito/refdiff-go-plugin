@@ -1,8 +1,8 @@
 package refdiff.parsers.go;
 
 import static org.hamcrest.CoreMatchers.is;
-import static org.junit.Assert.*;
-import static refdiff.test.util.CstDiffMatchers.*;
+import static org.junit.Assert.assertArrayEquals;
+import static org.junit.Assert.assertThat;
 
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -11,16 +11,10 @@ import java.util.List;
 
 import org.junit.Test;
 
-import com.google.gson.Gson;
-
 import refdiff.core.cst.CstNode;
 import refdiff.core.cst.CstRoot;
-import refdiff.core.diff.CstComparator;
-import refdiff.core.diff.CstDiff;
 import refdiff.core.diff.CstRootHelper;
-import refdiff.core.diff.RelationshipType;
 import refdiff.core.io.SourceFolder;
-import refdiff.parsers.go.GoPlugin;
 import refdiff.test.util.GoParserSingleton;
 
 public class TestCstGoParser {
@@ -65,6 +59,7 @@ public class TestCstGoParser {
 		CstNode fileNode = cstRoot.getNodes().get(0);
 		String sourceCode = sources.readContent(sources.getSourceFiles().get(0));
 
+		
 		List<String> actual = CstRootHelper.retrieveTokens(cstRoot, sourceCode, fileNode, false);
 		List<String> expected = Arrays.asList("package", "main", "\n", "// comment with UTF-8 chars: áçãûm test",
 				"func", "Test", "(", "a", "string", ")", "string", "{", "return", "a", "\n", "}");

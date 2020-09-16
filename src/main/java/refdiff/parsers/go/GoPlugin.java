@@ -16,19 +16,37 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 
 public class GoPlugin implements LanguagePlugin, Closeable {
 	private File tempDir = null;
+	private String parserPath;
 
-	public GoPlugin() throws Exception {}
+	public GoPlugin() throws Exception {
+		this.parserPath = this.getParserPath();
+	}
 
 	public GoPlugin(File tempDir) {
 		this.tempDir = tempDir;
+		this.parserPath = this.getParserPath();
+	}
+	
+	public String getParserPath() {
+		String parser = System.getenv("REFDIFF_GO_PARSER");
+		if (parser != null && !parser.isEmpty()) {
+			return parser;
+		}
+		
+		String parserFile = "parser"; // default linux
+		String OS = System.getProperty("os.name", "generic").toLowerCase(Locale.ENGLISH);
+		if ((OS.indexOf("mac") >= 0) || (OS.indexOf("darwin") >= 0)) {
+			parserFile = "parser-darwin";
+		} else if (OS.indexOf("win") >= 0) {
+			parserFile = "parser-win.exe";
+		}
+	
+		return GoPlugin.class.getClassLoader().getResource(parserFile).getPath();
 	}
 
 	public Node[] execParser(String rootFolder, String path) throws IOException {
-		ProcessBuilder builder = new ProcessBuilder("/home/rodrigo/development/go-ast-parser/parser",
-				"-directory", rootFolder, "-file", path);
+		ProcessBuilder builder = new ProcessBuilder(parserPath,	"-directory", rootFolder, "-file", path);
 		Process proc = builder.start();
-
-		System.out.println("Parsing: "+path);
 
 		Node[] nodes = new Node[0];
 		try {
@@ -55,8 +73,6 @@ public class GoPlugin implements LanguagePlugin, Closeable {
 				// check nodes in fallbacks and add to root
 				CstNode fallbackNode = fallbackByAddress.get(parent.getKey());
 				if (fallbackNode == null) {
-//					throw new RuntimeException("node not found: " + parent.getKey());
-					System.err.println("NODE NOT FOUND: " + parent.getKey());
 					continue;
 				}
 				nodeByAddress.put(parent.getKey(), fallbackNode);
@@ -103,9 +119,9 @@ public class GoPlugin implements LanguagePlugin, Closeable {
 	}
 
 	private boolean isValidGoFile(String path) {
-		return path.endsWith(".go") && !path.startsWith("vendor/") && !path.endsWith("_test.go") &&
-				!path.endsWith("generated.pb.go") && !path.endsWith("_gen.go") && !path.endsWith("_generated.go") &&
-				!path.endsWith(".generated.go") && !path.matches("generated\\..+\\.go$");
+		return path.endsWith(".go") && !path.startsWith("testdata/") && !path.startsWith("test/") && !path.startsWith("vendor/") &&
+				!path.endsWith("_test.go") && !path.endsWith("generated.pb.go") && !path.endsWith("_gen.go") &&
+				!path.endsWith("_generated.go") &&	!path.endsWith(".generated.go") && !path.matches("generated\\..+\\.go$");
 	}
 
 	@Override
@@ -263,7 +279,8 @@ public class GoPlugin implements LanguagePlugin, Closeable {
 
 	@Override
 	public FilePathFilter getAllowedFilesFilter() {
-		return new FilePathFilter(Arrays.asList(".go"), Arrays.asList("_test.go", "gen.go"));
+		List<String> ignoreFiles = Arrays.asList("_test.go", ".gen.go", "_gen.go", "generated.go", ".pb.go", "gqlgen/gqlgen.go", "models/models.go");
+		return new FilePathFilter(Arrays.asList(".go"), ignoreFiles);
 	}
 
 	@Override
